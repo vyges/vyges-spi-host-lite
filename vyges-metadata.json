@@ -1,0 +1,78 @@
+{
+  "$schema": "https://vyges.com/schema/v1/vyges-metadata.schema.json",
+  "name": "vyges-spi-host-lite",
+  "version": "0.1.0",
+  "description": "Lightweight SPI master controller with native TL-UL slave interface. Supports SPI modes 0-3 (CPOL/CPHA), configurable clock divider, 8/16/32-bit transfers, TX/RX FIFOs, and interrupt outputs. Designed for ADXL355 MEMS accelerometer and similar SPI peripherals.",
+  "category": "peripheral",
+  "license": "Apache-2.0",
+  "owner": "Vyges Inc.",
+  "maturity": "development",
+  "created": "2026-03-28T01:30:05Z",
+  "updated": "2026-03-28T01:30:05Z",
+  "target": ["asic", "fpga"],
+  "design_type": ["digital"],
+  "interfaces": [
+    {
+      "name": "tl_slave",
+      "protocol": "tl-ul",
+      "role": "device",
+      "signals": [
+        {"name": "clk_i", "direction": "input", "width": 1, "type": "clock"},
+        {"name": "rst_ni", "direction": "input", "width": 1, "type": "reset"},
+        {"name": "tl_i", "direction": "input", "type": "tl_h2d_t"},
+        {"name": "tl_o", "direction": "output", "type": "tl_d2h_t"}
+      ]
+    },
+    {
+      "name": "spi_master",
+      "protocol": "spi",
+      "role": "master",
+      "signals": [
+        {"name": "spi_sclk_o", "direction": "output", "width": 1},
+        {"name": "spi_cs_no", "direction": "output", "width": 1},
+        {"name": "spi_mosi_o", "direction": "output", "width": 1},
+        {"name": "spi_miso_i", "direction": "input", "width": 1}
+      ]
+    },
+    {
+      "name": "interrupts",
+      "protocol": "irq",
+      "role": "source",
+      "signals": [
+        {"name": "intr_tx_empty_o", "direction": "output", "width": 1},
+        {"name": "intr_rx_full_o", "direction": "output", "width": 1},
+        {"name": "intr_idle_o", "direction": "output", "width": 1}
+      ]
+    }
+  ],
+  "registers": [
+    {"name": "CTRL",    "offset": "0x00", "width": 32, "access": "RW", "description": "Control: [0] enable, [1] cpol, [2] cpha, [4:3] xfer_len"},
+    {"name": "STATUS",  "offset": "0x04", "width": 32, "access": "RO", "description": "Status: [0] busy, [1] tx_full, [2] tx_empty, [3] rx_full, [4] rx_empty"},
+    {"name": "DIV",     "offset": "0x08", "width": 32, "access": "RW", "description": "Clock divider: SCLK = clk_i / (2*(div+1))"},
+    {"name": "TXDATA",  "offset": "0x0C", "width": 32, "access": "WO", "description": "TX FIFO write port"},
+    {"name": "RXDATA",  "offset": "0x10", "width": 32, "access": "RO", "description": "RX FIFO read port"},
+    {"name": "CSCTRL",  "offset": "0x14", "width": 32, "access": "RW", "description": "Chip select control: [0] cs_assert"},
+    {"name": "INTR_EN", "offset": "0x18", "width": 32, "access": "RW", "description": "Interrupt enable: [0] tx_empty, [1] rx_full, [2] idle"},
+    {"name": "INTR_ST", "offset": "0x1C", "width": 32, "access": "RW", "description": "Interrupt status (write-1-to-clear)"}
+  ],
+  "parameters": [
+    {"name": "FIFO_DEPTH", "type": "int", "default": 8, "description": "TX and RX FIFO depth (entries)"}
+  ],
+  "performance": {
+    "max_sclk_mhz": 25,
+    "target_frequency_mhz": 50,
+    "latency_cycles": 1
+  },
+  "dependencies": [
+    {"name": "opentitan-tlul", "reason": "tlul_pkg types (tl_h2d_t, tl_d2h_t)"}
+  ],
+  "trust": {
+    "verification_level": "unverified",
+    "tapeout_count": 0,
+    "fpga_validated": false,
+    "maintained": true
+  },
+  "rtl_files": [
+    "rtl/spi_host_lite.sv"
+  ]
+}
