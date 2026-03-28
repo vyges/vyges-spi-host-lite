@@ -76,7 +76,7 @@ module spi_host_lite
   // Single-cycle response (always ready)
   assign tl_o.a_ready  = 1'b1;
   assign tl_o.d_valid  = rsp_valid;
-  assign tl_o.d_opcode = req_write ? AccessAck : AccessAckData;
+  assign tl_o.d_opcode = tl_d_op_e'(req_write ? AccessAck : AccessAckData);
   assign tl_o.d_param  = '0;
   assign tl_o.d_size   = req_size;
   assign tl_o.d_source = req_source;
