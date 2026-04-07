@@ -184,5 +184,39 @@
   ],
   "branding": {
     "display_name": "SPI Host"
+  },
+  "integration": {
+    "soc_generator_hints": {
+      "top_module": "spi_host_lite",
+      "clock": {
+        "port": "clk_i"
+      },
+      "reset": {
+        "port": "rst_ni",
+        "polarity": "active_low"
+      },
+      "bus_slave": {
+        "protocol": "TL-UL",
+        "ports": {
+          "tl_i": "tl_i",
+          "tl_o": "tl_o"
+        }
+      },
+      "interrupts": [
+        {
+          "port": "intr_tx_empty_o",
+          "type": "level"
+        },
+        {
+          "port": "intr_rx_full_o",
+          "type": "level"
+        },
+        {
+          "port": "intr_idle_o",
+          "type": "level"
+        }
+      ],
+      "parameters": []
+    }
   }
 }
