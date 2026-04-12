@@ -18,6 +18,31 @@
   ],
   "interfaces": [
     {
+      "type": "clock",
+      "name": "clock",
+      "signals": [
+        {
+          "name": "clk_i",
+          "direction": "input",
+          "type": "clock",
+          "width": 1
+        }
+      ]
+    },
+    {
+      "type": "reset",
+      "name": "reset",
+      "signals": [
+        {
+          "name": "rst_ni",
+          "direction": "input",
+          "type": "reset",
+          "width": 1,
+          "active_level": "low"
+        }
+      ]
+    },
+    {
       "name": "tl_slave",
       "protocol": "tl-ul",
       "role": "device",
@@ -218,5 +243,19 @@
       ],
       "parameters": []
     }
+  },
+  "test": {
+    "testbenches": [
+      {
+        "name": "soc_integration",
+        "path": "tb/cocotb/",
+        "framework": "cocotb",
+        "simulators": [
+          "verilator"
+        ],
+        "description": "SoC-level integration verified in edge-sensor-soc"
+      }
+    ],
+    "coverage": "functional"
   }
 }
