@@ -66,7 +66,7 @@ module spi_host_lite
 
   // A channel unpack
   assign req_valid  = tl_i.a_valid;
-  assign req_write  = (tl_i.a_opcode == PutFullData) || (tl_i.a_opcode == PutPartialData);
+  assign req_write  = (tl_i.a_opcode == tlul_pkg::PutFullData) || (tl_i.a_opcode == tlul_pkg::PutPartialData);
   assign req_addr   = tl_i.a_address;
   assign req_wdata  = tl_i.a_data;
   assign req_mask   = tl_i.a_mask;
