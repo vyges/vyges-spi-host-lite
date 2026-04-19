@@ -74,16 +74,37 @@ module spi_host_lite
   assign req_size   = tl_i.a_size;
 
   // Single-cycle response (always ready)
-  assign tl_o.a_ready  = 1'b1;
-  assign tl_o.d_valid  = rsp_valid;
-  assign tl_o.d_opcode = tl_d_op_e'(req_write ? AccessAck : AccessAckData);
-  assign tl_o.d_param  = '0;
-  assign tl_o.d_size   = req_size;
-  assign tl_o.d_source = req_source;
-  assign tl_o.d_sink   = '0;
-  assign tl_o.d_data   = rsp_rdata;
-  assign tl_o.d_error  = rsp_error;
-  assign tl_o.d_user   = '0;
+  // Build pre-integrity response; tlul_rsp_intg_gen below signs rsp_intg +
+  // data_intg so CPU-side tlul_rsp_intg_chk (always-on in opentitan-rv-core-
+  // ibex's tlul_adapter_host) accepts the d-channel. Without this, any CPU
+  // transaction to SPI traps Ibex on the first response. See the Bus
+  // security domain contract work item in deckrun-server/docs/todo.md.
+  tl_d2h_t tl_o_pre;
+  assign tl_o_pre.a_ready  = 1'b1;
+  assign tl_o_pre.d_valid  = rsp_valid;
+  // Use LATCHED _q versions — req_write / req_size / req_source track the
+  // current cycle's a_channel input, but rsp_valid is pipelined 1 cycle so
+  // by the time we assert d_valid, a_source has moved on. Response routed
+  // via d_source gets delivered to the wrong host (SBA requests from DM
+  // master get responses delivered to CPU instead of DM). Original
+  // assignments (req_source, req_write, req_size directly) were a latent
+  // bug that only surfaced under a multi-host signed TL-UL domain.
+  assign tl_o_pre.d_opcode = tl_d_op_e'(rsp_write_q ? AccessAck : AccessAckData);
+  assign tl_o_pre.d_param  = '0;
+  assign tl_o_pre.d_size   = rsp_size_q;
+  assign tl_o_pre.d_source = rsp_source_q;
+  assign tl_o_pre.d_sink   = '0;
+  assign tl_o_pre.d_data   = rsp_rdata;
+  assign tl_o_pre.d_error  = rsp_error;
+  assign tl_o_pre.d_user   = '0;
+
+  tlul_rsp_intg_gen #(
+    .EnableRspIntgGen  (1),
+    .EnableDataIntgGen (1)
+  ) u_rsp_intg_gen (
+    .tl_i (tl_o_pre),
+    .tl_o (tl_o)
+  );
 
   // Latch source/size for response
   logic [7:0] rsp_source_q;
@@ -112,6 +133,12 @@ module spi_host_lite
   logic        reg_cpol;
   logic        reg_cpha;
   logic [1:0]  reg_xfer_len;   // 0=8bit, 1=16bit, 2=32bit
+  // CTRL[5] — internal MOSI->MISO loopback for self-test. When set, the
+  // shift_rx samples the MOSI output we are driving rather than the
+  // external spi_miso_i pin. Lets any SoC run a SPI host self-test via
+  // SBA without needing a physical peripheral or a jumper on the Pmod.
+  // Default 0 (external mode). See fpga_day0_spi_loopback_*.py.
+  logic        reg_loopback;
   logic [15:0] reg_div;
   logic        reg_cs_assert;
   logic [2:0]  reg_intr_en;
@@ -140,6 +167,7 @@ module spi_host_lite
       reg_cpol      <= 1'b0;
       reg_cpha      <= 1'b0;
       reg_xfer_len  <= 2'b0;
+      reg_loopback  <= 1'b0;
       reg_div       <= 16'd7;   // default: clk/16
       reg_cs_assert <= 1'b0;
       reg_intr_en   <= 3'b0;
@@ -157,6 +185,7 @@ module spi_host_lite
             reg_cpol     <= req_wdata[1];
             reg_cpha     <= req_wdata[2];
             reg_xfer_len <= req_wdata[4:3];
+            reg_loopback <= req_wdata[5];   // CTRL[5] — internal loopback
           end
           8'h08: reg_div       <= req_wdata[15:0];  // DIV
           8'h14: reg_cs_assert <= req_wdata[0];      // CSCTRL
@@ -186,7 +215,7 @@ module spi_host_lite
     end else if (req_valid && !req_write) begin
       rsp_error <= 1'b0;
       case (reg_offset)
-        8'h00: rsp_rdata <= {27'b0, reg_xfer_len, reg_cpha, reg_cpol, reg_enable};
+        8'h00: rsp_rdata <= {26'b0, reg_loopback, reg_xfer_len, reg_cpha, reg_cpol, reg_enable};
         8'h04: rsp_rdata <= {27'b0, rx_empty, rx_full, tx_empty, tx_full, spi_busy};
         8'h08: rsp_rdata <= {16'b0, reg_div};
         8'h10: rsp_rdata <= rx_rdata;
@@ -298,6 +327,12 @@ module spi_host_lite
   logic [5:0]  bit_cnt;
   logic [5:0]  bit_max;
   logic        spi_busy_prev;
+  // CPHA=1 modes (1 and 3) need MOSI held for one half-clock after LOAD
+  // before the first master-shift so the slave sees bit 7 on its first
+  // sample edge. first_leading_skip: set in ST_LOAD when reg_cpha=1; the
+  // first leading edge in ST_SHIFT clears it without shifting. Subsequent
+  // leading edges shift normally. In CPHA=0 this stays 0 and has no effect.
+  logic        first_leading_skip;
 
   // Bit count based on transfer length
   always_comb begin
@@ -341,6 +376,7 @@ module spi_host_lite
       shift_rx  <= '0;
       bit_cnt   <= '0;
       spi_busy_prev <= 1'b0;
+      first_leading_skip <= 1'b0;
     end else begin
       spi_busy_prev <= spi_busy;
 
@@ -348,7 +384,22 @@ module spi_host_lite
         ST_IDLE: begin
           sclk_q <= reg_cpol;
           if (!tx_empty && reg_enable) begin
-            shift_tx <= tx_rdata;
+            // Align tx_rdata to shift_tx MSB based on reg_xfer_len so
+            // MOSI (= shift_tx[31]) emits real data on the first edge
+            // and each shift-left drops the next bit out. Without this
+            // alignment, an 8-bit transfer of 0x5B (loaded as
+            // 0x0000005B) would shift 0s out of bit 31 for the entire
+            // 8-clock window -- MOSI always 0, no matter what the CPU
+            // wrote to TXDATA. Masked by the external MISO behavior
+            // (sensor saw only 0x00 command bytes and never responded;
+            // we read floating MISO = 0xFF and blamed the sensor).
+            // Discovered during FPGA loopback diagnostic 2026-04-18.
+            unique case (reg_xfer_len)
+              2'd0: shift_tx <= {tx_rdata[ 7:0], 24'b0};   // 8-bit
+              2'd1: shift_tx <= {tx_rdata[15:0], 16'b0};   // 16-bit
+              2'd2: shift_tx <= tx_rdata;                  // 32-bit
+              default: shift_tx <= {tx_rdata[7:0], 24'b0};
+            endcase
             shift_rx <= '0;
             bit_cnt  <= '0;
             state_q  <= ST_LOAD;
@@ -356,18 +407,32 @@ module spi_host_lite
         end
 
         ST_LOAD: begin
-          // One cycle to latch data, then shift
+          // One cycle to latch data, then shift. In CPHA=1 modes the
+          // first leading edge must not shift -- slave samples bit 7 on
+          // the first trailing edge and MOSI must still hold bit 7.
+          first_leading_skip <= reg_cpha;
           state_q <= ST_SHIFT;
         end
 
         ST_SHIFT: begin
           if (clk_edge) begin
+            // MISO source mux: external pin in normal mode, MOSI echo in
+            // loopback mode. MOSI is shift_tx[31] -- the bit we're about
+            // to (or just did) drive on the external pin.
+            automatic logic miso_sample = reg_loopback ? shift_tx[31] : spi_miso_i;
             if (!sclk_q ^ reg_cpol) begin
               // Leading edge: sample MISO (CPHA=0) or shift MOSI (CPHA=1)
               if (!reg_cpha) begin
-                shift_rx <= {shift_rx[30:0], spi_miso_i};
+                shift_rx <= {shift_rx[30:0], miso_sample};
               end else begin
-                shift_tx <= {shift_tx[30:0], 1'b0};
+                // CPHA=1: skip the very first leading-edge shift so MOSI
+                // still holds bit 7 when the slave samples on the upcoming
+                // trailing edge. 2nd+ leading edges shift normally.
+                if (first_leading_skip) begin
+                  first_leading_skip <= 1'b0;
+                end else begin
+                  shift_tx <= {shift_tx[30:0], 1'b0};
+                end
               end
               sclk_q <= ~sclk_q;
             end else begin
@@ -375,7 +440,7 @@ module spi_host_lite
               if (!reg_cpha) begin
                 shift_tx <= {shift_tx[30:0], 1'b0};
               end else begin
-                shift_rx <= {shift_rx[30:0], spi_miso_i};
+                shift_rx <= {shift_rx[30:0], miso_sample};
               end
               sclk_q <= ~sclk_q;
 

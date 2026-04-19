@@ -1,14 +1,11 @@
 {
   "$schema": "https://vyges.com/schema/v1/vyges-metadata.schema.json",
+  "x-version": "1.0.0",
   "name": "vyges-spi-host-lite",
   "version": "0.1.0",
-  "description": "Lightweight SPI master controller with native TL-UL slave interface. Supports SPI modes 0-3 (CPOL/CPHA), configurable clock divider, 8/16/32-bit transfers, TX/RX FIFOs, and interrupt outputs. Designed for ADXL355 MEMS accelerometer and similar SPI peripherals.",
-  "category": "peripheral",
+  "description": "Lightweight SPI master controller with TL-UL slave interface, supporting SPI modes 0\u20133, configurable clock divider, and interrupt-driven TX/RX FIFO operations.",
   "license": "Apache-2.0",
-  "owner": "Vyges Inc.",
-  "maturity": "development",
-  "created": "2026-03-28T01:30:05Z",
-  "updated": "2026-03-28T01:30:05Z",
+  "maturity": "rtl_verified",
   "target": [
     "asic",
     "fpga"
@@ -16,167 +13,119 @@
   "design_type": [
     "digital"
   ],
+  "created": "2026-03-28T01:51:56Z",
+  "updated": "2026-04-17T18:33:40Z",
+  "source": {
+    "type": "git",
+    "url": "https://github.com/vyges/vyges-spi-host-lite",
+    "commit": "b9c1d206503d4123b45794c13b4cb5fd729eac9e",
+    "ip_path": ".",
+    "private": false,
+    "containsEncryptedPayload": false,
+    "indexing": true
+  },
+  "maintainers": [
+    {
+      "name": "Vyges",
+      "email": "team@vyges.com",
+      "url": "https://vyges.com",
+      "github": "vyges"
+    }
+  ],
   "interfaces": [
     {
       "type": "clock",
-      "name": "clock",
-      "signals": [
-        {
-          "name": "clk_i",
-          "direction": "input",
-          "type": "clock",
-          "width": 1
-        }
-      ]
+      "direction": "input",
+      "protocol": "generic",
+      "port": "clk_i",
+      "width": 1,
+      "description": "System clock input."
     },
     {
       "type": "reset",
-      "name": "reset",
-      "signals": [
-        {
-          "name": "rst_ni",
-          "direction": "input",
-          "type": "reset",
-          "width": 1,
-          "active_level": "low"
-        }
-      ]
+      "direction": "input",
+      "protocol": "generic",
+      "port": "rst_ni",
+      "width": 1,
+      "description": "Active-low system reset input."
     },
     {
-      "name": "tl_slave",
-      "protocol": "tl-ul",
-      "role": "device",
+      "type": "bus",
+      "direction": "slave",
+      "protocol": "TL-UL",
+      "port": "tl_i",
+      "width": 1,
+      "description": "TileLink UL register-access interface.",
       "signals": [
-        {
-          "name": "clk_i",
-          "direction": "input",
-          "width": 1,
-          "type": "clock"
-        },
-        {
-          "name": "rst_ni",
-          "direction": "input",
-          "width": 1,
-          "type": "reset"
-        },
         {
           "name": "tl_i",
           "direction": "input",
-          "type": "tl_h2d_t"
+          "type": "bus",
+          "description": "TL-UL host-to-device (tl_h2d_t struct)"
         },
         {
           "name": "tl_o",
           "direction": "output",
-          "type": "tl_d2h_t"
+          "type": "bus",
+          "description": "TL-UL device-to-host (tl_d2h_t struct)"
         }
       ]
     },
     {
-      "name": "spi_master",
-      "protocol": "spi",
-      "role": "master",
-      "signals": [
-        {
-          "name": "spi_sclk_o",
-          "direction": "output",
-          "width": 1
-        },
-        {
-          "name": "spi_cs_no",
-          "direction": "output",
-          "width": 1
-        },
-        {
-          "name": "spi_mosi_o",
-          "direction": "output",
-          "width": 1
-        },
-        {
-          "name": "spi_miso_i",
-          "direction": "input",
-          "width": 1
-        }
-      ]
+      "type": "serial",
+      "direction": "output",
+      "protocol": "SPI",
+      "port": "spi_sclk_o",
+      "width": 1,
+      "description": "SPI clock output."
     },
     {
-      "name": "interrupts",
-      "protocol": "irq",
-      "role": "source",
-      "signals": [
-        {
-          "name": "intr_tx_empty_o",
-          "direction": "output",
-          "width": 1
-        },
-        {
-          "name": "intr_rx_full_o",
-          "direction": "output",
-          "width": 1
-        },
-        {
-          "name": "intr_idle_o",
-          "direction": "output",
-          "width": 1
-        }
-      ]
-    }
-  ],
-  "registers": [
-    {
-      "name": "CTRL",
-      "offset": "0x00",
-      "width": 32,
-      "access": "RW",
-      "description": "Control: [0] enable, [1] cpol, [2] cpha, [4:3] xfer_len"
+      "type": "serial",
+      "direction": "output",
+      "protocol": "SPI",
+      "port": "spi_cs_no",
+      "width": 1,
+      "description": "SPI chip-select output (active low)."
     },
     {
-      "name": "STATUS",
-      "offset": "0x04",
-      "width": 32,
-      "access": "RO",
-      "description": "Status: [0] busy, [1] tx_full, [2] tx_empty, [3] rx_full, [4] rx_empty"
+      "type": "serial",
+      "direction": "output",
+      "protocol": "SPI",
+      "port": "spi_mosi_o",
+      "width": 1,
+      "description": "SPI master-out slave-in data output."
     },
     {
-      "name": "DIV",
-      "offset": "0x08",
-      "width": 32,
-      "access": "RW",
-      "description": "Clock divider: SCLK = clk_i / (2*(div+1))"
+      "type": "serial",
+      "direction": "input",
+      "protocol": "SPI",
+      "port": "spi_miso_i",
+      "width": 1,
+      "description": "SPI master-in slave-out data input."
     },
     {
-      "name": "TXDATA",
-      "offset": "0x0C",
-      "width": 32,
-      "access": "WO",
-      "description": "TX FIFO write port"
+      "type": "interrupt",
+      "direction": "output",
+      "protocol": "generic",
+      "port": "intr_tx_empty_o",
+      "width": 1,
+      "description": "Interrupt output for TX FIFO empty condition."
     },
     {
-      "name": "RXDATA",
-      "offset": "0x10",
-      "width": 32,
-      "access": "RO",
-      "description": "RX FIFO read port"
+      "type": "interrupt",
+      "direction": "output",
+      "protocol": "generic",
+      "port": "intr_rx_full_o",
+      "width": 1,
+      "description": "Interrupt output for RX FIFO full condition."
     },
     {
-      "name": "CSCTRL",
-      "offset": "0x14",
-      "width": 32,
-      "access": "RW",
-      "description": "Chip select control: [0] cs_assert"
-    },
-    {
-      "name": "INTR_EN",
-      "offset": "0x18",
-      "width": 32,
-      "access": "RW",
-      "description": "Interrupt enable: [0] tx_empty, [1] rx_full, [2] idle"
-    },
-    {
-      "name": "INTR_ST",
-      "offset": "0x1C",
-      "width": 32,
-      "access": "RW",
-      "description": "Interrupt status (write-1-to-clear)"
+      "type": "interrupt",
+      "direction": "output",
+      "protocol": "generic",
+      "port": "intr_idle_o",
+      "width": 1,
+      "description": "Interrupt output for SPI idle condition."
     }
   ],
   "parameters": [
@@ -184,66 +133,36 @@
       "name": "FIFO_DEPTH",
       "type": "int",
       "default": 8,
-      "description": "TX and RX FIFO depth (entries)"
+      "description": "Configurable depth of TX and RX FIFOs (number of entries)."
     }
   ],
-  "performance": {
-    "max_sclk_mhz": 25,
-    "target_frequency_mhz": 50,
-    "latency_cycles": 1
+  "performance": {},
+  "architecture": {
+    "type": "peripheral",
+    "features": [
+      "Supports SPI modes 0\u20133 (CPOL/CPHA configurable)",
+      "Configurable clock divider (SCLK = clk_i / (2 * (div+1)))",
+      "8/16/32-bit transfer length",
+      "TX and RX FIFOs with configurable depth",
+      "Single chip-select output (active low)",
+      "Interrupt-driven operation (tx_empty, rx_full, idle)"
+    ]
   },
-  "dependencies": [
-    {
-      "name": "opentitan-tlul",
-      "reason": "tlul_pkg types (tl_h2d_t, tl_d2h_t)"
-    }
-  ],
-  "trust": {
-    "verification_level": "unverified",
-    "tapeout_count": 0,
-    "fpga_validated": false,
-    "maintained": true
+  "asic": {
+    "flavor": "digital",
+    "technology": [
+      "sky130A"
+    ]
   },
-  "rtl_files": [
-    "rtl/spi_host_lite.sv"
-  ],
-  "branding": {
-    "display_name": "SPI Host"
+  "fpga": {
+    "toolchain": [
+      "Vivado"
+    ],
+    "devices": [
+      "Artix-7"
+    ]
   },
-  "integration": {
-    "soc_generator_hints": {
-      "top_module": "spi_host_lite",
-      "clock": {
-        "port": "clk_i"
-      },
-      "reset": {
-        "port": "rst_ni",
-        "polarity": "active_low"
-      },
-      "bus_slave": {
-        "protocol": "TL-UL",
-        "ports": {
-          "tl_i": "tl_i",
-          "tl_o": "tl_o"
-        }
-      },
-      "interrupts": [
-        {
-          "port": "intr_tx_empty_o",
-          "type": "level"
-        },
-        {
-          "port": "intr_rx_full_o",
-          "type": "level"
-        },
-        {
-          "port": "intr_idle_o",
-          "type": "level"
-        }
-      ],
-      "parameters": []
-    }
-  },
+  "dependencies": [],
   "test": {
     "testbenches": [
       {
@@ -256,6 +175,47 @@
         "description": "SoC-level integration verified in edge-sensor-soc"
       }
     ],
+    "status": "upstream_passing",
     "coverage": "functional"
+  },
+  "documentation": {
+    "upstream": "https://github.com/vyges/vyges-spi-host-lite"
+  },
+  "artifacts": {
+    "total_rtl_lines": 411
+  },
+  "categories": [
+    {
+      "main_category": "Interface Controllers",
+      "sub_category": "Serial Interfaces"
+    }
+  ],
+  "keywords": [
+    "SPI",
+    "TL-UL",
+    "FIFO",
+    "Interrupts",
+    "Peripheral"
+  ],
+  "trust": {
+    "verification_level": "simulation_passing",
+    "tapeout_count": 0,
+    "fpga_validated": false,
+    "formal_verified": false,
+    "maintained": true,
+    "last_activity": "2026-03-28"
+  },
+  "meta": {
+    "template": {
+      "generator": "github-models-ai",
+      "template_version": "1.0.0",
+      "generated_at": "2026-03-28T01:51:56Z"
+    },
+    "schema": {
+      "version": "1.0.0"
+    }
+  },
+  "branding": {
+    "display_name": "SPI Host"
   }
 }
