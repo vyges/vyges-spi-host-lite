@@ -69,7 +69,8 @@
           "type": "bus",
           "description": "TL-UL device-to-host (tl_d2h_t struct)"
         }
-      ]
+      ],
+      "protocol_level": "baseline"
     },
     {
       "type": "serial",
