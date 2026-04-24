@@ -14,7 +14,7 @@
     "digital"
   ],
   "created": "2026-03-28T01:51:56Z",
-  "updated": "2026-04-17T18:33:40Z",
+  "updated": "2026-04-24T18:23:41Z",
   "source": {
     "type": "git",
     "url": "https://github.com/vyges/vyges-spi-host-lite",
@@ -135,6 +135,56 @@
       "type": "int",
       "default": 8,
       "description": "Configurable depth of TX and RX FIFOs (number of entries)."
+    }
+  ],
+  "registers": [
+    {
+      "name": "CTRL",
+      "offset": "0x00",
+      "access": "RW",
+      "description": "enable[0], cpol[1], cpha[2], xfer_len[7:3]"
+    },
+    {
+      "name": "STATUS",
+      "offset": "0x04",
+      "access": "RO",
+      "description": "busy[0], tx_full[1], tx_empty[2], rx_full[3], rx_empty[4]"
+    },
+    {
+      "name": "DIV",
+      "offset": "0x08",
+      "access": "RW",
+      "description": "SCLK divider [15:0]  (SCLK = clk / (2*(div+1)))"
+    },
+    {
+      "name": "TXDATA",
+      "offset": "0x0C",
+      "access": "WO",
+      "description": "TX FIFO push"
+    },
+    {
+      "name": "RXDATA",
+      "offset": "0x10",
+      "access": "RO",
+      "description": "RX FIFO pop"
+    },
+    {
+      "name": "CSCTRL",
+      "offset": "0x14",
+      "access": "RW",
+      "description": "cs_assert[0]  (1=assert, 0=deassert)"
+    },
+    {
+      "name": "INTR_EN",
+      "offset": "0x18",
+      "access": "RW",
+      "description": "Interrupt enable [2:0]"
+    },
+    {
+      "name": "INTR_ST",
+      "offset": "0x1C",
+      "access": "RW",
+      "description": "Interrupt status [2:0]  (W1C)"
     }
   ],
   "performance": {},
