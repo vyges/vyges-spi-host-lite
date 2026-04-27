@@ -64,6 +64,14 @@ module spi_host_lite
   logic [31:0] rsp_rdata;
   logic        rsp_error;
 
+  // Latched source/size/opcode for the d-channel response (driven below).
+  // Declared up front so the tl_o_pre.d_* assigns don't trip Synth 8-6901
+  // (use-before-declaration) — Vivado's strict-lint pass flags forward
+  // refs even when the surrounding code is functionally fine.
+  logic [7:0] rsp_source_q;
+  logic [1:0] rsp_size_q;
+  logic       rsp_write_q;
+
   // A channel unpack
   assign req_valid  = tl_i.a_valid;
   assign req_write  = (tl_i.a_opcode == tlul_pkg::PutFullData) || (tl_i.a_opcode == tlul_pkg::PutPartialData);
@@ -106,11 +114,8 @@ module spi_host_lite
     .tl_o (tl_o)
   );
 
-  // Latch source/size for response
-  logic [7:0] rsp_source_q;
-  logic [1:0] rsp_size_q;
-  logic       rsp_write_q;
-
+  // Latch source/size/write for the d-channel response (declarations are
+  // above near the rest of the rsp_* signals).
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       rsp_valid  <= 1'b0;
@@ -258,6 +263,15 @@ module spi_host_lite
       tx_wptr  <= '0;
       tx_rptr  <= '0;
       tx_count <= '0;
+      // Explicit reset of FIFO storage so Vivado's priority analysis
+      // sees reset > conditional-write unambiguously. Without this,
+      // Vivado treats the absence of an assignment in the reset branch
+      // as an implicit "hold current value" with the same priority as
+      // the conditional `tx_mem[tx_wptr] <= tx_wdata` in the else
+      // branch, and emits Synth 8-7137 (set/reset same priority) per
+      // FIFO entry. FPGA cost is zero (Xilinx FFs init via GSR
+      // regardless); ASIC cost is FIFO_DEPTH × 32 reset wires.
+      for (int i = 0; i < FIFO_DEPTH; i++) tx_mem[i] <= '0;
     end else begin
       if (tx_push && !tx_pop) begin
         tx_mem[tx_wptr] <= tx_wdata;
@@ -291,6 +305,9 @@ module spi_host_lite
       rx_wptr  <= '0;
       rx_rptr  <= '0;
       rx_count <= '0;
+      // Explicit reset of FIFO storage — see tx_mem block above for the
+      // Synth 8-7137 priority-disambiguation rationale.
+      for (int i = 0; i < FIFO_DEPTH; i++) rx_mem[i] <= '0;
     end else begin
       if (rx_push && !rx_pop) begin
         rx_mem[rx_wptr] <= rx_wdata;
