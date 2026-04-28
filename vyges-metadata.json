@@ -14,11 +14,11 @@
     "digital"
   ],
   "created": "2026-03-28T01:51:56Z",
-  "updated": "2026-04-24T18:23:41Z",
+  "updated": "2026-04-28T02:23:04Z",
   "source": {
     "type": "git",
     "url": "https://github.com/vyges/vyges-spi-host-lite",
-    "commit": "b9c1d206503d4123b45794c13b4cb5fd729eac9e",
+    "commit": "544ebfe07fe7bfb9b5082801edd5437f10c05573",
     "ip_path": ".",
     "private": false,
     "containsEncryptedPayload": false,
@@ -254,7 +254,7 @@
     "fpga_validated": false,
     "formal_verified": false,
     "maintained": true,
-    "last_activity": "2026-03-28"
+    "last_activity": "2026-04-28"
   },
   "meta": {
     "template": {
