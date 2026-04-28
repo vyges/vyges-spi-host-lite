@@ -49,41 +49,86 @@ module spi_host_lite
 );
 
   // -------------------------------------------------------------------------
-  // TL-UL slave port — vyges_tlul_reg_slave handles the 2-stage signing
-  // pipeline (tlul_adapter_reg + tlul_rsp_intg_gen). Replaced the prior
-  // hand-rolled req-unpack + rsp pipeline + manual d_user='0 + downstream
-  // tlul_rsp_intg_gen because the hand-rolled pattern produced rsp_intg /
-  // data_intg that did not round-trip on cold cross-peripheral reads (the
-  // "+0x00 wedge" symptom on a signed Ibex bus). UART (opentitan-uart)
-  // uses the same adapter+intg-gen cascade inside its reg_top.
+  // TL-UL response logic
   // -------------------------------------------------------------------------
 
-  // Register-bus interface from the adapter.
-  logic        reg_we;
-  logic        reg_re;
-  logic [7:0]  reg_addr;
-  logic [31:0] reg_wdata;
-  logic [3:0]  reg_be;
-  logic [31:0] reg_rdata;
-  logic        reg_error;
+  logic        req_valid;
+  logic        req_write;
+  logic [31:0] req_addr;
+  logic [31:0] req_wdata;
+  logic [3:0]  req_mask;
+  logic [7:0]  req_source;
+  logic [1:0]  req_size;
 
-  vyges_tlul_reg_slave #(
-    .RegAw (8),
-    .RegDw (32)
-  ) u_tl_slave (
-    .clk_i,
-    .rst_ni,
-    .tl_i,
-    .tl_o,
-    .we_o   (reg_we),
-    .re_o   (reg_re),
-    .addr_o (reg_addr),
-    .wdata_o(reg_wdata),
-    .be_o   (reg_be),
-    .rdata_i(reg_rdata),
-    .error_i(reg_error),
-    .intg_err_o ()
+  logic        rsp_valid;
+  logic [31:0] rsp_rdata;
+  logic        rsp_error;
+
+  // Latched source/size/opcode for the d-channel response (driven below).
+  // Declared up front so the tl_o_pre.d_* assigns don't trip Synth 8-6901
+  // (use-before-declaration) — Vivado's strict-lint pass flags forward
+  // refs even when the surrounding code is functionally fine.
+  logic [7:0] rsp_source_q;
+  logic [1:0] rsp_size_q;
+  logic       rsp_write_q;
+
+  // A channel unpack
+  assign req_valid  = tl_i.a_valid;
+  assign req_write  = (tl_i.a_opcode == tlul_pkg::PutFullData) || (tl_i.a_opcode == tlul_pkg::PutPartialData);
+  assign req_addr   = tl_i.a_address;
+  assign req_wdata  = tl_i.a_data;
+  assign req_mask   = tl_i.a_mask;
+  assign req_source = tl_i.a_source;
+  assign req_size   = tl_i.a_size;
+
+  // Single-cycle response (always ready)
+  // Build pre-integrity response; tlul_rsp_intg_gen below signs rsp_intg +
+  // data_intg so CPU-side tlul_rsp_intg_chk (always-on in opentitan-rv-core-
+  // ibex's tlul_adapter_host) accepts the d-channel. Without this, any CPU
+  // transaction to SPI traps Ibex on the first response. See the Bus
+  // security domain contract work item in deckrun-server/docs/todo.md.
+  tl_d2h_t tl_o_pre;
+  assign tl_o_pre.a_ready  = 1'b1;
+  assign tl_o_pre.d_valid  = rsp_valid;
+  // Use LATCHED _q versions — req_write / req_size / req_source track the
+  // current cycle's a_channel input, but rsp_valid is pipelined 1 cycle so
+  // by the time we assert d_valid, a_source has moved on. Response routed
+  // via d_source gets delivered to the wrong host (SBA requests from DM
+  // master get responses delivered to CPU instead of DM). Original
+  // assignments (req_source, req_write, req_size directly) were a latent
+  // bug that only surfaced under a multi-host signed TL-UL domain.
+  assign tl_o_pre.d_opcode = tl_d_op_e'(rsp_write_q ? AccessAck : AccessAckData);
+  assign tl_o_pre.d_param  = '0;
+  assign tl_o_pre.d_size   = rsp_size_q;
+  assign tl_o_pre.d_source = rsp_source_q;
+  assign tl_o_pre.d_sink   = '0;
+  assign tl_o_pre.d_data   = rsp_rdata;
+  assign tl_o_pre.d_error  = rsp_error;
+  assign tl_o_pre.d_user   = '0;
+
+  tlul_rsp_intg_gen #(
+    .EnableRspIntgGen  (1),
+    .EnableDataIntgGen (1)
+  ) u_rsp_intg_gen (
+    .tl_i (tl_o_pre),
+    .tl_o (tl_o)
   );
+
+  // Latch source/size/write for the d-channel response (declarations are
+  // above near the rest of the rsp_* signals).
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      rsp_valid  <= 1'b0;
+      rsp_source_q <= '0;
+      rsp_size_q   <= '0;
+      rsp_write_q  <= 1'b0;
+    end else begin
+      rsp_valid    <= req_valid;
+      rsp_source_q <= req_source;
+      rsp_size_q   <= req_size;
+      rsp_write_q  <= req_write;
+    end
+  end
 
   // -------------------------------------------------------------------------
   // Registers
@@ -115,8 +160,11 @@ module spi_host_lite
   logic        spi_idle_edge;   // rising edge of idle
 
   // -------------------------------------------------------------------------
-  // Register write — driven by the adapter's we_o/addr_o/wdata_o.
+  // Register write
   // -------------------------------------------------------------------------
+
+  logic [7:0] reg_offset;
+  assign reg_offset = req_addr[7:0];
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
@@ -135,19 +183,19 @@ module spi_host_lite
       if (rx_full)      reg_intr_st[1] <= 1'b1;
       if (spi_idle_edge) reg_intr_st[2] <= 1'b1;
 
-      if (reg_we) begin
-        case (reg_addr)
+      if (req_valid && req_write) begin
+        case (reg_offset)
           8'h00: begin  // CTRL
-            reg_enable   <= reg_wdata[0];
-            reg_cpol     <= reg_wdata[1];
-            reg_cpha     <= reg_wdata[2];
-            reg_xfer_len <= reg_wdata[4:3];
-            reg_loopback <= reg_wdata[5];   // CTRL[5] — internal loopback
+            reg_enable   <= req_wdata[0];
+            reg_cpol     <= req_wdata[1];
+            reg_cpha     <= req_wdata[2];
+            reg_xfer_len <= req_wdata[4:3];
+            reg_loopback <= req_wdata[5];   // CTRL[5] — internal loopback
           end
-          8'h08: reg_div       <= reg_wdata[15:0];  // DIV
-          8'h14: reg_cs_assert <= reg_wdata[0];      // CSCTRL
-          8'h18: reg_intr_en   <= reg_wdata[2:0];    // INTR_EN
-          8'h1C: reg_intr_st   <= reg_intr_st & ~reg_wdata[2:0];  // INTR_ST (W1C)
+          8'h08: reg_div       <= req_wdata[15:0];  // DIV
+          8'h14: reg_cs_assert <= req_wdata[0];      // CSCTRL
+          8'h18: reg_intr_en   <= req_wdata[2:0];    // INTR_EN
+          8'h1C: reg_intr_st   <= reg_intr_st & ~req_wdata[2:0];  // INTR_ST (W1C)
           default: ;
         endcase
       end
@@ -155,30 +203,39 @@ module spi_host_lite
   end
 
   // TX FIFO push on write to TXDATA
-  assign tx_push  = reg_we && (reg_addr == 8'h0C) && !tx_full;
-  assign tx_wdata = reg_wdata;
+  assign tx_push  = req_valid && req_write && (reg_offset == 8'h0C) && !tx_full;
+  assign tx_wdata = req_wdata;
 
   // RX FIFO pop on read from RXDATA
-  assign rx_pop = reg_re && (reg_addr == 8'h10) && !rx_empty;
+  assign rx_pop = req_valid && !req_write && (reg_offset == 8'h10) && !rx_empty;
 
   // -------------------------------------------------------------------------
-  // Register read — combinational mux into the adapter's rdata_i.
-  // tlul_adapter_reg with AccessLatency=0 expects same-cycle read data.
+  // Register read
   // -------------------------------------------------------------------------
 
-  always_comb begin
-    reg_rdata = '0;
-    reg_error = 1'b0;
-    case (reg_addr)
-      8'h00: reg_rdata = {26'b0, reg_loopback, reg_xfer_len, reg_cpha, reg_cpol, reg_enable};
-      8'h04: reg_rdata = {27'b0, rx_empty, rx_full, tx_empty, tx_full, spi_busy};
-      8'h08: reg_rdata = {16'b0, reg_div};
-      8'h10: reg_rdata = rx_rdata;
-      8'h14: reg_rdata = {31'b0, reg_cs_assert};
-      8'h18: reg_rdata = {29'b0, reg_intr_en};
-      8'h1C: reg_rdata = {29'b0, reg_intr_st};
-      default: reg_error = 1'b1;
-    endcase
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      rsp_rdata <= '0;
+      rsp_error <= 1'b0;
+    end else if (req_valid && !req_write) begin
+      rsp_error <= 1'b0;
+      case (reg_offset)
+        8'h00: rsp_rdata <= {26'b0, reg_loopback, reg_xfer_len, reg_cpha, reg_cpol, reg_enable};
+        8'h04: rsp_rdata <= {27'b0, rx_empty, rx_full, tx_empty, tx_full, spi_busy};
+        8'h08: rsp_rdata <= {16'b0, reg_div};
+        8'h10: rsp_rdata <= rx_rdata;
+        8'h14: rsp_rdata <= {31'b0, reg_cs_assert};
+        8'h18: rsp_rdata <= {29'b0, reg_intr_en};
+        8'h1C: rsp_rdata <= {29'b0, reg_intr_st};
+        default: begin
+          rsp_rdata <= '0;
+          rsp_error <= 1'b1;
+        end
+      endcase
+    end else begin
+      rsp_rdata <= '0;
+      rsp_error <= 1'b0;
+    end
   end
 
   // -------------------------------------------------------------------------
