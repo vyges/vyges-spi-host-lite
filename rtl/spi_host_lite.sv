@@ -167,8 +167,13 @@ module spi_host_lite
   // Register write
   // -------------------------------------------------------------------------
 
-  logic [7:0] reg_offset;
-  assign reg_offset = req_addr[7:0];
+  // The device occupies a 4 KB region: decode all twelve offset bits so
+  // the registers do not repeat through it.
+  logic [11:0] reg_offset;
+  assign reg_offset = req_addr[11:0];
+
+  logic reg_mapped;
+  assign reg_mapped = (reg_offset <= 12'h01C) && (reg_offset[1:0] == 2'b00);
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
@@ -189,17 +194,17 @@ module spi_host_lite
 
       if (req_valid && req_write) begin
         case (reg_offset)
-          8'h00: begin  // CTRL
+          12'h000: begin  // CTRL
             reg_enable   <= req_wdata[0];
             reg_cpol     <= req_wdata[1];
             reg_cpha     <= req_wdata[2];
             reg_xfer_len <= req_wdata[4:3];
             reg_loopback <= req_wdata[5];   // CTRL[5] — internal loopback
           end
-          8'h08: reg_div       <= req_wdata[15:0];  // DIV
-          8'h14: reg_cs_assert <= req_wdata[0];      // CSCTRL
-          8'h18: reg_intr_en   <= req_wdata[2:0];    // INTR_EN
-          8'h1C: reg_intr_st   <= reg_intr_st & ~req_wdata[2:0];  // INTR_ST (W1C)
+          12'h008: reg_div       <= req_wdata[15:0];  // DIV
+          12'h014: reg_cs_assert <= req_wdata[0];      // CSCTRL
+          12'h018: reg_intr_en   <= req_wdata[2:0];    // INTR_EN
+          12'h01C: reg_intr_st   <= reg_intr_st & ~req_wdata[2:0];  // INTR_ST (W1C)
           default: ;
         endcase
       end
@@ -207,11 +212,11 @@ module spi_host_lite
   end
 
   // TX FIFO push on write to TXDATA
-  assign tx_push  = req_valid && req_write && (reg_offset == 8'h0C) && !tx_full;
+  assign tx_push  = req_valid && req_write && (reg_offset == 12'h00C) && !tx_full;
   assign tx_wdata = req_wdata;
 
   // RX FIFO pop on read from RXDATA
-  assign rx_pop = req_valid && !req_write && (reg_offset == 8'h10) && !rx_empty;
+  assign rx_pop = req_valid && !req_write && (reg_offset == 12'h010) && !rx_empty;
 
   // -------------------------------------------------------------------------
   // Register read
@@ -224,18 +229,21 @@ module spi_host_lite
     end else if (req_valid && !req_write) begin
       rsp_error <= 1'b0;
       case (reg_offset)
-        8'h00: rsp_rdata <= {26'b0, reg_loopback, reg_xfer_len, reg_cpha, reg_cpol, reg_enable};
-        8'h04: rsp_rdata <= {27'b0, rx_empty, rx_full, tx_empty, tx_full, spi_busy};
-        8'h08: rsp_rdata <= {16'b0, reg_div};
-        8'h10: rsp_rdata <= rx_rdata;
-        8'h14: rsp_rdata <= {31'b0, reg_cs_assert};
-        8'h18: rsp_rdata <= {29'b0, reg_intr_en};
-        8'h1C: rsp_rdata <= {29'b0, reg_intr_st};
+        12'h000: rsp_rdata <= {26'b0, reg_loopback, reg_xfer_len, reg_cpha, reg_cpol, reg_enable};
+        12'h004: rsp_rdata <= {27'b0, rx_empty, rx_full, tx_empty, tx_full, spi_busy};
+        12'h008: rsp_rdata <= {16'b0, reg_div};
+        12'h010: rsp_rdata <= rx_rdata;
+        12'h014: rsp_rdata <= {31'b0, reg_cs_assert};
+        12'h018: rsp_rdata <= {29'b0, reg_intr_en};
+        12'h01C: rsp_rdata <= {29'b0, reg_intr_st};
         default: begin
           rsp_rdata <= '0;
           rsp_error <= 1'b1;
         end
       endcase
+    end else if (req_valid && req_write) begin
+      rsp_rdata <= '0;
+      rsp_error <= !reg_mapped;
     end else if (req_a_ready) begin
       rsp_rdata <= '0;
       rsp_error <= 1'b0;
