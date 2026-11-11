@@ -187,11 +187,6 @@ module spi_host_lite
       reg_intr_en   <= 3'b0;
       reg_intr_st   <= 3'b0;
     end else begin
-      // Interrupt status set
-      if (tx_empty)     reg_intr_st[0] <= 1'b1;
-      if (rx_full)      reg_intr_st[1] <= 1'b1;
-      if (spi_idle_edge) reg_intr_st[2] <= 1'b1;
-
       if (req_valid && req_write) begin
         case (reg_offset)
           12'h000: if (req_mask[0]) begin  // CTRL
@@ -211,6 +206,12 @@ module spi_host_lite
           default: ;
         endcase
       end
+
+      // Interrupt status set. After the write handling, so an event in the
+      // same cycle as a write to INTR_ST is not lost.
+      if (tx_empty)     reg_intr_st[0] <= 1'b1;
+      if (rx_full)      reg_intr_st[1] <= 1'b1;
+      if (spi_idle_edge) reg_intr_st[2] <= 1'b1;
     end
   end
 
