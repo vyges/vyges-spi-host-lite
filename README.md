@@ -24,6 +24,8 @@ Lightweight SPI master controller with native TL-UL slave interface. Vyges origi
 | 0x18   | INTR_EN | RW     | [0] tx_empty_en, [1] rx_full_en, [2] idle_en |
 | 0x1C   | INTR_ST | RW     | Write-1-to-clear interrupt status |
 
+Each word uses the CTRL and DIV settings in force when it loads from the TX FIFO. A write to CTRL or DIV during a transfer applies from the next word.
+
 ## Parameters
 
 | Parameter  | Default | Description |

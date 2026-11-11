@@ -367,9 +367,17 @@ module spi_host_lite
   // leading edges shift normally. In CPHA=0 this stays 0 and has no effect.
   logic        first_leading_skip;
 
+  // Settings for the word in flight, latched when it loads. A write to CTRL
+  // or DIV during a transfer takes effect from the next word.
+  logic [1:0]  xfer_len_q;
+  logic        cpol_q;
+  logic        cpha_q;
+  logic        loopback_q;
+  logic [15:0] div_q;
+
   // Bit count based on transfer length
   always_comb begin
-    case (reg_xfer_len)
+    case (xfer_len_q)
       2'd0: bit_max = 6'd7;    // 8-bit
       2'd1: bit_max = 6'd15;   // 16-bit
       2'd2: bit_max = 6'd31;   // 32-bit
@@ -383,7 +391,7 @@ module spi_host_lite
       clk_cnt  <= '0;
       clk_edge <= 1'b0;
     end else if (state_q == ST_SHIFT) begin
-      if (clk_cnt == reg_div) begin
+      if (clk_cnt == div_q) begin
         clk_cnt  <= '0;
         clk_edge <= 1'b1;
       end else begin
@@ -410,6 +418,11 @@ module spi_host_lite
       bit_cnt   <= '0;
       spi_busy_prev <= 1'b0;
       first_leading_skip <= 1'b0;
+      xfer_len_q <= 2'b0;
+      cpol_q     <= 1'b0;
+      cpha_q     <= 1'b0;
+      loopback_q <= 1'b0;
+      div_q      <= '0;
     end else begin
       spi_busy_prev <= spi_busy;
 
@@ -435,6 +448,11 @@ module spi_host_lite
             endcase
             shift_rx <= '0;
             bit_cnt  <= '0;
+            xfer_len_q <= reg_xfer_len;
+            cpol_q     <= reg_cpol;
+            cpha_q     <= reg_cpha;
+            loopback_q <= reg_loopback;
+            div_q      <= reg_div;
             state_q  <= ST_LOAD;
           end
         end
@@ -443,7 +461,7 @@ module spi_host_lite
           // One cycle to latch data, then shift. In CPHA=1 modes the
           // first leading edge must not shift -- slave samples bit 7 on
           // the first trailing edge and MOSI must still hold bit 7.
-          first_leading_skip <= reg_cpha;
+          first_leading_skip <= cpha_q;
           state_q <= ST_SHIFT;
         end
 
@@ -452,10 +470,10 @@ module spi_host_lite
             // MISO source mux: external pin in normal mode, MOSI echo in
             // loopback mode. MOSI is shift_tx[31] -- the bit we're about
             // to (or just did) drive on the external pin.
-            automatic logic miso_sample = reg_loopback ? shift_tx[31] : spi_miso_i;
-            if (!sclk_q ^ reg_cpol) begin
+            automatic logic miso_sample = loopback_q ? shift_tx[31] : spi_miso_i;
+            if (!sclk_q ^ cpol_q) begin
               // Leading edge: sample MISO (CPHA=0) or shift MOSI (CPHA=1)
-              if (!reg_cpha) begin
+              if (!cpha_q) begin
                 shift_rx <= {shift_rx[30:0], miso_sample};
               end else begin
                 // CPHA=1: skip the very first leading-edge shift so MOSI
@@ -470,7 +488,7 @@ module spi_host_lite
               sclk_q <= ~sclk_q;
             end else begin
               // Trailing edge: shift MOSI (CPHA=0) or sample MISO (CPHA=1)
-              if (!reg_cpha) begin
+              if (!cpha_q) begin
                 shift_tx <= {shift_tx[30:0], 1'b0};
               end else begin
                 shift_rx <= {shift_rx[30:0], miso_sample};
@@ -487,7 +505,7 @@ module spi_host_lite
         end
 
         ST_DONE: begin
-          sclk_q <= reg_cpol;
+          sclk_q <= cpol_q;
           state_q <= ST_IDLE;
         end
 
