@@ -73,7 +73,11 @@ module spi_host_lite
   logic       rsp_write_q;
 
   // A channel unpack
-  assign req_valid  = tl_i.a_valid;
+  // A request is accepted only when the response slot is free or being
+  // consumed, so a response the host has stalled is never overwritten.
+  logic req_a_ready;
+  assign req_a_ready = !rsp_valid || tl_i.d_ready;
+  assign req_valid  = tl_i.a_valid && req_a_ready;
   assign req_write  = (tl_i.a_opcode == tlul_pkg::PutFullData) || (tl_i.a_opcode == tlul_pkg::PutPartialData);
   assign req_addr   = tl_i.a_address;
   assign req_wdata  = tl_i.a_data;
@@ -81,14 +85,14 @@ module spi_host_lite
   assign req_source = tl_i.a_source;
   assign req_size   = tl_i.a_size;
 
-  // Single-cycle response (always ready)
+  // Single-cycle response
   // Build pre-integrity response; tlul_rsp_intg_gen below signs rsp_intg +
   // data_intg so CPU-side tlul_rsp_intg_chk (always-on in opentitan-rv-core-
   // ibex's tlul_adapter_host) accepts the d-channel. Without this, any CPU
   // transaction to SPI traps Ibex on the first response. See the Bus
   // security domain contract work item in deckrun-server/docs/todo.md.
   tl_d2h_t tl_o_pre;
-  assign tl_o_pre.a_ready  = 1'b1;
+  assign tl_o_pre.a_ready  = req_a_ready;
   assign tl_o_pre.d_valid  = rsp_valid;
   // Use LATCHED _q versions — req_write / req_size / req_source track the
   // current cycle's a_channel input, but rsp_valid is pipelined 1 cycle so
@@ -122,7 +126,7 @@ module spi_host_lite
       rsp_source_q <= '0;
       rsp_size_q   <= '0;
       rsp_write_q  <= 1'b0;
-    end else begin
+    end else if (req_a_ready) begin
       rsp_valid    <= req_valid;
       rsp_source_q <= req_source;
       rsp_size_q   <= req_size;
@@ -232,7 +236,7 @@ module spi_host_lite
           rsp_error <= 1'b1;
         end
       endcase
-    end else begin
+    end else if (req_a_ready) begin
       rsp_rdata <= '0;
       rsp_error <= 1'b0;
     end
