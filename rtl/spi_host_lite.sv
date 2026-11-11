@@ -194,17 +194,20 @@ module spi_host_lite
 
       if (req_valid && req_write) begin
         case (reg_offset)
-          12'h000: begin  // CTRL
+          12'h000: if (req_mask[0]) begin  // CTRL
             reg_enable   <= req_wdata[0];
             reg_cpol     <= req_wdata[1];
             reg_cpha     <= req_wdata[2];
             reg_xfer_len <= req_wdata[4:3];
             reg_loopback <= req_wdata[5];   // CTRL[5] — internal loopback
           end
-          12'h008: reg_div       <= req_wdata[15:0];  // DIV
-          12'h014: reg_cs_assert <= req_wdata[0];      // CSCTRL
-          12'h018: reg_intr_en   <= req_wdata[2:0];    // INTR_EN
-          12'h01C: reg_intr_st   <= reg_intr_st & ~req_wdata[2:0];  // INTR_ST (W1C)
+          12'h008: begin  // DIV
+            if (req_mask[0]) reg_div[7:0]  <= req_wdata[7:0];
+            if (req_mask[1]) reg_div[15:8] <= req_wdata[15:8];
+          end
+          12'h014: if (req_mask[0]) reg_cs_assert <= req_wdata[0];      // CSCTRL
+          12'h018: if (req_mask[0]) reg_intr_en   <= req_wdata[2:0];    // INTR_EN
+          12'h01C: if (req_mask[0]) reg_intr_st   <= reg_intr_st & ~req_wdata[2:0];  // INTR_ST (W1C)
           default: ;
         endcase
       end
